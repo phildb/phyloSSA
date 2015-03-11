@@ -4,7 +4,7 @@ from itertools import count, permutations, combinations, izip, chain
 from math import sqrt, log, exp, pi
 from collections import namedtuple, defaultdict
 from sys import exit
-from time import time
+import time
 
 
 
@@ -14,7 +14,7 @@ class Parameters(object):
 		# General parameters
 		self.fixed_seed = False
 		self.pretty = True
-		self.drawinterval = 10
+		self.drawinterval = 20
 		self.summaryinterval = 1000
 		self.recalibrateinterval = 200000
 		
@@ -252,58 +252,80 @@ class Lattice(object):
 	def create(self, point):
 		self.total_n += 1
 		if point in self.sites.keys():
+			# Pull affected processes
 			affected = self.attached_processes[point]
 			self.meta.pull_processes(affected)
+			# Refresh affected processes
 			self.sites[point] += 1
 			for pr in affected:
 				pr.refresh_rate()
+			# Push back affected processes
 			self.meta.push_processes([a for a in affected if a.rate > 0.0])
 		else:
+			# Create new site
 			self.sites[point] = 1
 			self.attached_processes[point] = []
+			# Generate and attach its 1st order processes...
 			for ptemplate in self.classes1st:
 				process = ptemplate(point, self, self.params)
 				self.attached_processes[point].append(process)
-
+			# ...also its 2nd order processes according to the stencile
 			for ptemplate in self.classes2nd:
 				for p1, p2 in ptemplate.stencile(point, self, self.params):
 					process = ptemplate(p1, p2, self, self.params)
 					self.attached_processes[p1].append(process)
 					self.attached_processes[p2].append(process)
 
+			# Refresh the rate of these newly minted processes
 			for pr in self.attached_processes[point]:
 				pr.refresh_rate()
 
+			# And push them into the metaprocess
 			self.meta.push_processes([a for a in self.attached_processes[point] if a.rate > 0.0])
 
 	def annihilate(self, point):
 		self.total_n -= 1
 		if point in self.sites.keys():
+			# Pull affected processes out of the meta process
 			affected = self.attached_processes[point]
 			self.meta.pull_processes(affected)
+			# Annihilate and refresh their rates
 			self.sites[point] -= 1
 			for pr in affected:
 				pr.refresh_rate()
 			if self.sites[point] > 0:
+				# Push them back into th emeta process if the site is still active
 				self.meta.push_processes([a for a in affected if a.rate > 0.0])
 			else:
+				# Otherwise delete the point from the dictionary...
 				del self.sites[point]
+				# ...along with its attached processes
 				for pr in self.attached_processes[point]:
+					# but just before that, make sure that these processes'
+					# references lingering at point2 get cleaned first
 					if pr.order == 2:
 						if pr.point1 != point:
 							self.attached_processes[pr.point1].remove(pr)
 						if pr.point2 != point:
 							self.attached_processes[pr.point2].remove(pr)
+				# ...and delete these attached processes for real now
 				del self.attached_processes[point]
+				# They were pull, so nothing's left to push.
 		else:
+			# So you're trying to annihilate at some emtpy site? Something went horribly wrong
 			raise ValueError('Orphan process, annihilation at empty site ' + repr(point))
 
+
+	# This is used by refresh_rate methods
 	def n(self, point):
 		if point in self.sites.keys():
 			return self.sites[point]
 		else:
 			return 0
 
+	# This is used for now by mutation/speciation processes to give an age
+	# to new types. Processes are unaware of their metaprocess and should
+	# always transact through the Lattice.
 	def t(self):
 		return meta._t
 
@@ -421,6 +443,18 @@ class Metaprocess(object):
 		residue = None
 
 
+def summary(old_time, new_time):
+	return ('processed = ' + repr(meta.processed) 
+		+ ' | total pop = ' + repr(lattice.total_n) 
+		+ ' | num. sps. = ' + repr(len(lattice.sites)) 
+		+ ' | active proc. = ' + str(len(meta._sorted_processes)) 
+		+ ' | tries in 1K = ' + repr(meta.intervaltries) 
+		+ ' | avg. tries = ' + '%.1f'%(float(meta.intervaltries)/params.summaryinterval) 
+		+ ' | min rate = ' + '%.2f'%(meta._sorted_processes[0].rate) 
+		+ ' | max rate = ' + '%.2f'%meta._sorted_processes[-1].rate 
+		+ ' | delta total = ' + '%.2e'%(meta._total_rate - sum(pr.rate for pr in meta._sorted_processes)) 
+		+ ' | in %.2f'%(new_time-old_time) + 'secs')
+
 params = Parameters()
 iwanthue = dict()
 
@@ -431,43 +465,22 @@ meta = Metaprocess()
 lattice = Lattice(meta, [], [BirthProcess, DeathProcess, IntraCompetitionProcess, StepMutationProcess], [NNInterCompetitionProcess], params)
 #lattice = Lattice(meta, [], [BirthProcess, DeathProcess, IntraCompetitionProcess], [])
 
-
-# lattice.create(Point(niche=5,age=0.0,vulnerability=0))
-# lattice.create(Point(niche=5,age=0.0,vulnerability=0))
-# lattice.create(Point(niche=5,age=0.0,vulnerability=0))
-# lattice.create(Point(niche=5,age=0.0,vulnerability=0))
 for _ in xrange(5):
 	lattice.create(Point(niche=5,age=0.0,vulnerability=0))
 	lattice.create(Point(niche=5,age=0.0,vulnerability=4))
-# lattice.create(Point(niche=5,age=0.0,vulnerability=4))
-# lattice.create(Point(niche=5,age=0.0,vulnerability=4))
-# lattice.create(Point(niche=5,age=0.0,vulnerability=4))
-# lattice.create(Point(niche=5,age=0.0,vulnerability=4))
-#lattice.annihilate(Point(niche=5,age=0.0,vulnerability=0))
-print(meta._sorted_processes)
-print(lattice.attached_processes)
+
+#print(meta._sorted_processes)
+#print(lattice.attached_processes)
 #exit()
 
-# print('---')
-# for i in xrange(0,21):
-# 	lattice.create(Point(niche=i%nicheWidth, age=0.0, vulnerability=0))
-
-
-
-
-# for i in xrange(1):
-# 	#initial_niche = uniform(0.0,10.0)
-# 	#initial_niche = randint(0,nicheWidth)
-# 	initial_niche = 5.0
-# 	lattice.create(Point(niche=initial_niche, age=0.0))
-# for i in xrange(20):
-# 	lattice.create(Point(niche=i, age=0.0))
-
-#exit()
 if params.pretty:
 	from pyprocessing import *
 
+	
+
 	def setup():
+		global old_time, new_time
+		old_time = time.time()
 		frameRate(200)
 		size(800,800)
 		ellipseMode(CENTER)
@@ -476,12 +489,14 @@ if params.pretty:
 		rect(0,0,800,800)
 
 	def draw():
-
+		global old_time, new_time
 		for i in xrange(params.drawinterval):
 			#residue = meta.step_purerejection()
 			residue = meta.step_gillespie()
 			if meta.processed % params.summaryinterval == 0:
-				print('processed = ' + repr(meta.processed) + ' | total pop = ' + repr(lattice.total_n) + ' | num. sps. = ' + repr(len(lattice.sites)) + ' | active proc. = ' + str(len(meta._sorted_processes))) + ' | tries in 1K = ' + repr(meta.intervaltries) + ' | avg. tries = ' + '%.1f'%(float(meta.intervaltries)/params.summaryinterval) + ' | min rate = ' + '%.2f'%(meta._sorted_processes[0].rate) + ' | max rate = ' + '%.2f'%(meta._sorted_processes[-1].rate)
+				new_time = time.time()
+				print(summary(old_time, new_time))
+				old_time = new_time
 				meta.intervaltries = 0
 
 
@@ -540,14 +555,17 @@ if params.pretty:
 
 	run()
 else:
-	old_time = time()
+	old_time = time.time()
 	for i in count():
 		meta.step_purerejection()
 		#meta.step_gillespie()
+		# Return a summary 
 		if meta.processed % params.summaryinterval == 0:
-			new_time = time()
-			print('processed = ' + repr(meta.processed) + ' | total pop = ' + repr(lattice.total_n) + ' | num. sps. = ' + repr(len(lattice.sites)) + ' | active proc. = ' + str(len(meta._sorted_processes)) + ' | tries in 1K = ' + repr(meta.intervaltries) + ' | avg. tries = ' + '%.1f'%(float(meta.intervaltries)/params.summaryinterval) + ' | min rate = ' + '%.2f'%(meta._sorted_processes[0].rate) + ' | max rate = ' + '%.2f'%meta._sorted_processes[-1].rate + ' | delta total = ' + '%.2e'%(meta._total_rate - sum(pr.rate for pr in meta._sorted_processes)) + ' | in %.2f'%(new_time-old_time) + 'secs')
+			new_time = time.time()
+			print(summary(old_time, new_time))
 			old_time = new_time
 			meta.intervaltries = 0
+		# We've substracted and added from and to the total_rate variable and group rates of log-bined process sets a lot.
+		# So to make sure that floating point underflow don't bit us back, we recompute all of these every few hundred-thousand steps.
 		if meta.processed % params.recalibrateinterval == 0:
 			meta._total_rate = sum(pr.rate for pr in meta._sorted_processes)
