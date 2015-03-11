@@ -11,24 +11,31 @@ from time import time
 class Parameters(object):
 	''' Contains program parameters'''
 	def __init__(self):
+		# General parameters
 		self.fixed_seed = False
 		self.pretty = True
-		self.drawinterval = 1
+		self.drawinterval = 10
 		self.summaryinterval = 1000
 		self.recalibrateinterval = 200000
 		
+		# Stochastic rates and lattice parameters
 		self.birthrate = 1.0
 		self.deathrate = 0.5
-		self.intracomprate = 0.03
-		self.intercomprate = 0.03
-		
+		self.intracomprate = 0.02
+		self.intercomprate = 0.01
+
 		self.mutationrate = 0.04
 		self.nichestep = 1
 		self.nicheWidth = 21
 		self.vulnstep = 1
 
+		# Pretty colors for plotting
+		# Thanks IWantHue @ http://tools.medialab.sciences-po.fr/iwanthue/
 		self.dark_palette = [[180,220,212],[219,65,42],[203,82,223],[104,220,73],[55,32,58],[221,173,53],[83,132,209],[222,132,172],[53,88,51],[98,225,160],[222,182,145],[73,126,144],[144,49,73],[205,220,64],[137,44,115],[146,63,32],[123,113,230],[223,51,97],[108,165,56],[146,103,82],[210,139,223],[53,43,29],[206,202,117],[217,124,57],[159,132,58],[87,160,105],[47,70,114],[212,72,177],[122,181,217],[144,155,128],[170,227,128],[195,223,173],[220,200,212],[86,28,28],[42,71,71],[94,79,27],[217,131,120],[175,162,223],[151,99,154],[78,116,40],[83,162,151],[100,223,217],[214,64,131],[114,82,172],[118,68,91],[78,49,107],[109,106,100],[181,145,165],[206,79,85],[110,113,142]]
 		self.light_palette = [[228,222,154],[224,177,237],[79,225,230],[248,150,144],[99,245,176],[248,167,82],[242,230,81],[149,205,107],[191,195,213],[173,238,199],[234,174,134],[227,205,106],[154,183,232],[215,247,102],[239,159,200],[50,243,221],[234,171,173],[100,211,241],[103,209,189],[246,194,79],[88,203,150],[163,234,233],[123,230,139],[178,195,116],[230,190,213],[151,196,156],[226,177,98],[239,156,102],[191,239,151],[142,203,133],[187,208,99],[188,228,169],[166,240,127],[188,174,211],[234,249,163],[172,215,194],[121,197,198],[229,242,122],[138,236,180],[203,181,106],[216,208,242],[171,208,222],[119,242,210],[240,221,98],[68,217,177],[218,190,75],[201,188,128],[230,213,131],[195,210,81],[212,227,145]]
+
+
+
 
 Point = namedtuple('Point', ['niche','age', 'vulnerability'])
 
@@ -305,8 +312,24 @@ class Lattice(object):
 
 class Metaprocess(object):
 	def __init__(self):
+		
+		# Actually the only reason we use a SortedSet instead of a simple set
+		# is to easily obtain the maximum and minimum process rate > 0.0.
+		# This is slightly overkill. The rejection step doesn't really need this
+		# overhead if we could find a better way to get the max rate.
 		self._sorted_processes = SortedSet(key=lambda pr: pr.rate)
-		self._process_set = set()
+
+		# For the composition-rejection step, we need to log2-bin all processes (composition)
+		# and then execute a rejection within the bin. A bin is selected
+		# in proportion to the total rate it contains. Each process contain
+		# the bin it is currently in so that the pull-push protocol knows
+		# where to pull all processes attached to a site together with the selected
+		# process without having to search for them.
+		# We use a dictionary of sets. The dictionary key will be the
+		#self._logbins
+
+		#self._process_set = set()
+
 		self._total_rate = 0.0
 		self._num_processes = 0
 		self._t = 0.0
@@ -341,15 +364,17 @@ class Metaprocess(object):
 				acc += pr.rate
 				if r2*total_rate < acc:
 					self.intervaltries += 1
-					pr.do()
+					residue = pr.do()
 					break
 		else:
 			print('Party\'s over, everybody\'s dead')
 			exit()
 
+		return residue
+
 
 	def step_purerejection(self):
-		residue = None
+		#residue = None
 		#if self._total_rate > 0.0:
 		#if True:
 		# This one's the right one, the true absorbing state; no relying on floats:
@@ -392,6 +417,8 @@ class Metaprocess(object):
 
 		return residue
 
+	def step_compositionrejection(self):
+		residue = None
 
 
 params = Parameters()
@@ -405,16 +432,17 @@ lattice = Lattice(meta, [], [BirthProcess, DeathProcess, IntraCompetitionProcess
 #lattice = Lattice(meta, [], [BirthProcess, DeathProcess, IntraCompetitionProcess], [])
 
 
-lattice.create(Point(niche=5,age=0.0,vulnerability=0))
-lattice.create(Point(niche=5,age=0.0,vulnerability=0))
-lattice.create(Point(niche=5,age=0.0,vulnerability=0))
-lattice.create(Point(niche=5,age=0.0,vulnerability=0))
-lattice.create(Point(niche=5,age=0.0,vulnerability=0))
-lattice.create(Point(niche=5,age=0.0,vulnerability=4))
-lattice.create(Point(niche=5,age=0.0,vulnerability=4))
-lattice.create(Point(niche=5,age=0.0,vulnerability=4))
-lattice.create(Point(niche=5,age=0.0,vulnerability=4))
-lattice.create(Point(niche=5,age=0.0,vulnerability=4))
+# lattice.create(Point(niche=5,age=0.0,vulnerability=0))
+# lattice.create(Point(niche=5,age=0.0,vulnerability=0))
+# lattice.create(Point(niche=5,age=0.0,vulnerability=0))
+# lattice.create(Point(niche=5,age=0.0,vulnerability=0))
+for _ in xrange(5):
+	lattice.create(Point(niche=5,age=0.0,vulnerability=0))
+	lattice.create(Point(niche=5,age=0.0,vulnerability=4))
+# lattice.create(Point(niche=5,age=0.0,vulnerability=4))
+# lattice.create(Point(niche=5,age=0.0,vulnerability=4))
+# lattice.create(Point(niche=5,age=0.0,vulnerability=4))
+# lattice.create(Point(niche=5,age=0.0,vulnerability=4))
 #lattice.annihilate(Point(niche=5,age=0.0,vulnerability=0))
 print(meta._sorted_processes)
 print(lattice.attached_processes)
@@ -450,13 +478,12 @@ if params.pretty:
 	def draw():
 
 		for i in xrange(params.drawinterval):
-			residue = meta.step_purerejection()
+			#residue = meta.step_purerejection()
+			residue = meta.step_gillespie()
 			if meta.processed % params.summaryinterval == 0:
 				print('processed = ' + repr(meta.processed) + ' | total pop = ' + repr(lattice.total_n) + ' | num. sps. = ' + repr(len(lattice.sites)) + ' | active proc. = ' + str(len(meta._sorted_processes))) + ' | tries in 1K = ' + repr(meta.intervaltries) + ' | avg. tries = ' + '%.1f'%(float(meta.intervaltries)/params.summaryinterval) + ' | min rate = ' + '%.2f'%(meta._sorted_processes[0].rate) + ' | max rate = ' + '%.2f'%(meta._sorted_processes[-1].rate)
 				meta.intervaltries = 0
 
-		#residue = meta.step_purerejection()
-		#meta.step_gillespie()
 
 		rectMode(CORNER)
 		noStroke()
