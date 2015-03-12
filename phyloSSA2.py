@@ -1,12 +1,23 @@
 from sortedcontainers import SortedListWithKey, SortedList, SortedSet
 from random import sample, randint, uniform, random, seed, getstate
 from itertools import count, permutations, combinations, izip, chain
-from math import sqrt, log, exp, pi
+from math import sqrt, log, exp, pi, floor
 from collections import namedtuple, defaultdict
 from sys import exit
 import time
 
 
+
+
+Point = namedtuple('Point', ['niche','age', 'vulnerability'])
+
+
+class ProcessBin(object):
+	def __init__(self, binrate=0.0, processes_in_bin=SortedSet(key=lambda pr: pr.rate)):
+		self.binrate = binrate
+		self.processes_in_bin = processes_in_bin
+	def __del__(self):
+		self.processes_in_bin = None
 
 class Parameters(object):
 	''' Contains program parameters'''
@@ -17,7 +28,13 @@ class Parameters(object):
 		self.drawinterval = 20
 		self.summaryinterval = 1000
 		self.recalibrateinterval = 200000
-		
+		self.pmin = 0.01
+
+		# Step algorithm is either 'gillespie', 'rejection', or 'composition-rejection'
+		#self.step_algorithm = 'gillespie'
+		#self.step_algorithm = 'rejection'
+		self.step_algorithm = 'composition-rejection'
+
 		# Stochastic rates and lattice parameters
 		self.birthrate = 1.0
 		self.deathrate = 0.5
@@ -34,10 +51,6 @@ class Parameters(object):
 		self.dark_palette = [[180,220,212],[219,65,42],[203,82,223],[104,220,73],[55,32,58],[221,173,53],[83,132,209],[222,132,172],[53,88,51],[98,225,160],[222,182,145],[73,126,144],[144,49,73],[205,220,64],[137,44,115],[146,63,32],[123,113,230],[223,51,97],[108,165,56],[146,103,82],[210,139,223],[53,43,29],[206,202,117],[217,124,57],[159,132,58],[87,160,105],[47,70,114],[212,72,177],[122,181,217],[144,155,128],[170,227,128],[195,223,173],[220,200,212],[86,28,28],[42,71,71],[94,79,27],[217,131,120],[175,162,223],[151,99,154],[78,116,40],[83,162,151],[100,223,217],[214,64,131],[114,82,172],[118,68,91],[78,49,107],[109,106,100],[181,145,165],[206,79,85],[110,113,142]]
 		self.light_palette = [[228,222,154],[224,177,237],[79,225,230],[248,150,144],[99,245,176],[248,167,82],[242,230,81],[149,205,107],[191,195,213],[173,238,199],[234,174,134],[227,205,106],[154,183,232],[215,247,102],[239,159,200],[50,243,221],[234,171,173],[100,211,241],[103,209,189],[246,194,79],[88,203,150],[163,234,233],[123,230,139],[178,195,116],[230,190,213],[151,196,156],[226,177,98],[239,156,102],[191,239,151],[142,203,133],[187,208,99],[188,228,169],[166,240,127],[188,174,211],[234,249,163],[172,215,194],[121,197,198],[229,242,122],[138,236,180],[203,181,106],[216,208,242],[171,208,222],[119,242,210],[240,221,98],[68,217,177],[218,190,75],[201,188,128],[230,213,131],[195,210,81],[212,227,145]]
 
-
-
-
-Point = namedtuple('Point', ['niche','age', 'vulnerability'])
 
 class BirthProcess(object):
 	''' The Birth process is a 1st order process sitting at a Point.\n
@@ -249,18 +262,20 @@ class Lattice(object):
 		self.params = params
 		self.total_n = 0
 
+
 	def create(self, point):
 		self.total_n += 1
 		if point in self.sites.keys():
 			# Pull affected processes
 			affected = self.attached_processes[point]
-			self.meta.pull_processes(affected)
+			self.meta.pull(affected)
 			# Refresh affected processes
 			self.sites[point] += 1
 			for pr in affected:
 				pr.refresh_rate()
 			# Push back affected processes
-			self.meta.push_processes([a for a in affected if a.rate > 0.0])
+			#self.meta.push_processes([a for a in affected if a.rate > 0.0])
+			self.meta.push(affected)
 		else:
 			# Create new site
 			self.sites[point] = 1
@@ -281,21 +296,23 @@ class Lattice(object):
 				pr.refresh_rate()
 
 			# And push them into the metaprocess
-			self.meta.push_processes([a for a in self.attached_processes[point] if a.rate > 0.0])
+			#self.meta.push_processes([a for a in self.attached_processes[point] if a.rate > 0.0])
+			self.meta.push(self.attached_processes[point])
 
 	def annihilate(self, point):
 		self.total_n -= 1
 		if point in self.sites.keys():
 			# Pull affected processes out of the meta process
 			affected = self.attached_processes[point]
-			self.meta.pull_processes(affected)
+			self.meta.pull(affected)
 			# Annihilate and refresh their rates
 			self.sites[point] -= 1
 			for pr in affected:
 				pr.refresh_rate()
 			if self.sites[point] > 0:
 				# Push them back into th emeta process if the site is still active
-				self.meta.push_processes([a for a in affected if a.rate > 0.0])
+				#self.meta.push_processes([a for a in affected if a.rate > 0.0])
+				self.meta.push(affected)
 			else:
 				# Otherwise delete the point from the dictionary...
 				del self.sites[point]
@@ -333,8 +350,11 @@ class Lattice(object):
 
 
 class Metaprocess(object):
-	def __init__(self):
+	def __init__(self, params):
 		
+		# The gillespie algorithm just uses a bag of processes
+		self._process_bag = set()
+
 		# Actually the only reason we use a SortedSet instead of a simple set
 		# is to easily obtain the maximum and minimum process rate > 0.0.
 		# This is slightly overkill. The rejection step doesn't really need this
@@ -348,46 +368,95 @@ class Metaprocess(object):
 		# where to pull all processes attached to a site together with the selected
 		# process without having to search for them.
 		# We use a dictionary of sets. The dictionary key will be the
-		#self._logbins
-
-		#self._process_set = set()
+		self._process_bins = dict()
 
 		self._total_rate = 0.0
 		self._num_processes = 0
 		self._t = 0.0
 		self.intervaltries = 0
 		self.processed = 0
+		self.p0 = params.pmin
 
-	def pull_processes(self, processes):
-		nonnull_processes = [a for a in processes if a.rate > 0.0]
-		self._sorted_processes -= nonnull_processes
-		#for pr in nonnull_processes:
+		if params.step_algorithm == 'gillespie':
+			self.pull = self.pull_sorted_processes
+			self.push = self.push_sorted_processes
+			self.step = self.step_gillespie
+		elif params.step_algorithm == 'rejection':
+			self.pull = self.pull_sorted_processes
+			self.push = self.push_sorted_processes
+			self.step = self.step_rejection
+		elif params.step_algorithm == 'composition-rejection':
+			self.pull = self.pull_binned_processes
+			self.push = self.push_binned_processes
+			self.step = self.step_compositionrejection
+
+
+
+
+	# Used by rejection algorithm
+	def pull_sorted_processes(self, processes):
+		active_processes = [pr for pr in processes if pr.rate > 0.0]
+		self._sorted_processes -= active_processes
+		#for pr in active_processes:
 		#	self._sorted_processes.remove(pr)
-		self._total_rate -= sum((pr.rate for pr in nonnull_processes))
-		self._num_processes -= len(nonnull_processes)
+		self._total_rate -= sum((pr.rate for pr in active_processes))
+		self._num_processes -= len(active_processes)		
 
-	def push_processes(self, processes):
-		nonnull_processes = [a for a in processes if a.rate > 0.0]
-		self._total_rate += sum(a.rate for a in nonnull_processes)
-		self._num_processes += len(nonnull_processes)
-		self._sorted_processes |= nonnull_processes
-		#self._sorted_processes.update(nonnull_processes)
+	def push_sorted_processes(self, processes):
+		active_processes = [pr for pr in processes if pr.rate > 0.0]
+		self._total_rate += sum(pr.rate for pr in active_processes)
+		self._num_processes += len(active_processes)
+		self._sorted_processes |= active_processes
+		#self._sorted_processes.update(active_processes)
+
+	# Used by the composition-rejection algorithm
+	def pull_binned_processes(self, processes):
+		active_processes = [(floor(log(pr.rate/self.p0, 2)), pr) for pr in processes if pr.rate > 0.0]
+		for li, pr in active_processes:
+			# Silently do nothing if it's not in process set. This occurs if the last time
+			# this process refreshed its rate went to 0.0
+			self._process_bins[li].processes_in_bin -= {pr}
+			self._process_bins[li].binrate -= pr.rate
+			if len(self._process_bins[li].processes_in_bin) == 0:
+				del self._process_bins[li].processes_in_bin
+				del self._process_bins[li]
+		self._total_rate -= sum(pr.rate for li, pr in active_processes)
+		self._num_processes -= len(active_processes)
+
+	def push_binned_processes(self, processes):
+		active_processes = [(floor(log(pr.rate/self.p0, 2)), pr) for pr in processes if pr.rate > 0.0]
+	
+		self._total_rate += sum(pr.rate for li, pr in active_processes)
+		self._num_processes += len(active_processes)
+		for li, pr in active_processes:
+			if li in self._process_bins.keys():
+				self._process_bins[li].binrate += pr.rate
+				self._process_bins[li].processes_in_bin |= {pr}
+			else:
+				#self._process_bins[li] = ProcessBin(binrate=pr.rate, processes_in_bin = SortedSet({pr},key=lambda pr: pr.rate))
+				self._process_bins[li] = ProcessBin(binrate=pr.rate, processes_in_bin = {pr})
+
+	# Random bag of processes used by the gillespie algorithm
+
 
 	# This might not work because the list of process is sorted
 	def step_gillespie(self):
 		total_rate = sum(pr.rate for pr in self._sorted_processes)
-		if total_rate > 0.0:
+		if len(meta._sorted_processes) > 0:
 			r1 = random()
 			self._t += -log(r1)/total_rate
 			r2 = random()
 			acc = 0.0
-			self.processed += 1
 			for pr in self._sorted_processes:
 				acc += pr.rate
+				self.intervaltries += 1
+
 				if r2*total_rate < acc:
-					self.intervaltries += 1
+#					self.intervaltries += 1
 					residue = pr.do()
 					break
+			self.processed += 1
+
 		else:
 			print('Party\'s over, everybody\'s dead')
 			exit()
@@ -395,7 +464,7 @@ class Metaprocess(object):
 		return residue
 
 
-	def step_purerejection(self):
+	def step_rejection(self):
 		#residue = None
 		#if self._total_rate > 0.0:
 		#if True:
@@ -409,7 +478,8 @@ class Metaprocess(object):
 			# Slepoy's et al algorithm cannot work without picking
 			# the first nonzero rate.
 			# min_rate = self._sorted_processes[0].rate
-			max_rate = self._sorted_processes[-1].rate
+			#max_rate = self._sorted_processes[-1].rate
+			max_rate = max(pr.rate for pr in self._sorted_processes)
 
 			for i in count():
 				#number_of_processes = len(self._sorted_processes)
@@ -433,6 +503,7 @@ class Metaprocess(object):
 					self.processed += 1
 					self.intervaltries += i+1
 					break
+
 		else:
 			print('Party\'s over, everybody\'s dead')
 			exit()
@@ -441,37 +512,72 @@ class Metaprocess(object):
 
 	def step_compositionrejection(self):
 		residue = None
+		if len(self._process_bins) > 0:
+			r1 = random()
+			try:
+				delta_t = -log(r1)/self._total_rate
+			except ZeroDivisionError:
+				print(self._process_bins)
+
+			self._t += delta_t
+
+			rG = random()
+			accG = 0.0
+			# Get at the logarithmic bin in a direct Gillespie manner (composition)
+			for logbin in self._process_bins.itervalues(): # Don't iterate otherwise the dict change
+				accG += logbin.binrate
+			#	self.intervaltries += 1
+				if rG*self._total_rate < accG:
+					selected_bin = logbin
+					break
+			# Enter the bin...
+			max_bin_rate = max(pr.rate for pr in selected_bin.processes_in_bin)
+			for i in count():
+				process = sample(selected_bin.processes_in_bin,1)[0]
+				if process.rate >= uniform(0, max_bin_rate):
+					residue = process.do()
+					self.processed += 1
+					self.intervaltries += i+1
+					break
+
+		else:
+			print('Party\'s over, everybody\'s dead')
+			exit()
+
+		return residue
 
 
 def summary(old_time, new_time):
 	return ('processed = ' + repr(meta.processed) 
 		+ ' | total pop = ' + repr(lattice.total_n) 
 		+ ' | num. sps. = ' + repr(len(lattice.sites)) 
-		+ ' | active proc. = ' + str(len(meta._sorted_processes)) 
+		+ ' | active proc. = ' + repr(len(meta._sorted_processes)) 
 		+ ' | tries in 1K = ' + repr(meta.intervaltries) 
 		+ ' | avg. tries = ' + '%.1f'%(float(meta.intervaltries)/params.summaryinterval) 
-		+ ' | min rate = ' + '%.2f'%(meta._sorted_processes[0].rate) 
-		+ ' | max rate = ' + '%.2f'%meta._sorted_processes[-1].rate 
+		#+ ' | min rate = ' + '%.2f'%(meta._sorted_processes[0].rate) 
+		#+ ' | max rate = ' + '%.2f'%meta._sorted_processes[-1].rate 
 		+ ' | delta total = ' + '%.2e'%(meta._total_rate - sum(pr.rate for pr in meta._sorted_processes)) 
 		+ ' | in %.2f'%(new_time-old_time) + 'secs')
 
 params = Parameters()
-iwanthue = dict()
 
+iwanthue = dict()
 
 if params.fixed_seed: seed(params.fixed_seed)
 
-meta = Metaprocess()
+meta = Metaprocess(params)
+
 lattice = Lattice(meta, [], [BirthProcess, DeathProcess, IntraCompetitionProcess, StepMutationProcess], [NNInterCompetitionProcess], params)
 #lattice = Lattice(meta, [], [BirthProcess, DeathProcess, IntraCompetitionProcess], [])
 
-for _ in xrange(5):
-	lattice.create(Point(niche=5,age=0.0,vulnerability=0))
-	lattice.create(Point(niche=5,age=0.0,vulnerability=4))
+p1 = Point(niche=5,age=0.0,vulnerability=0)
+p4 = Point(niche=5,age=0.0,vulnerability=4)
 
-#print(meta._sorted_processes)
-#print(lattice.attached_processes)
-#exit()
+for i in xrange(5):
+	lattice.create(p1)
+	lattice.create(p4)
+
+
 
 if params.pretty:
 	from pyprocessing import *
@@ -481,7 +587,7 @@ if params.pretty:
 	def setup():
 		global old_time, new_time
 		old_time = time.time()
-		frameRate(200)
+		frameRate(100)
 		size(800,800)
 		ellipseMode(CENTER)
 		noStroke()
@@ -489,10 +595,11 @@ if params.pretty:
 		rect(0,0,800,800)
 
 	def draw():
+		# Fugly
 		global old_time, new_time
+
 		for i in xrange(params.drawinterval):
-			#residue = meta.step_purerejection()
-			residue = meta.step_gillespie()
+			residue = meta.step()
 			if meta.processed % params.summaryinterval == 0:
 				new_time = time.time()
 				print(summary(old_time, new_time))
@@ -508,9 +615,10 @@ if params.pretty:
 		textSize(15)
 		text(' t = %.5f' % meta._t 
 			+ ' n = ' + repr(lattice.total_n) 
-			+ ' av. tries = ' + '%.1f'%(float(meta.intervaltries)/float(meta.processed))
+			+ ' av. tries = ' + '%.1f'%(float(meta.intervaltries)/float(params.summaryinterval))
 			+ ' processed = ' + repr(meta.processed)
 			,25,25)
+
 		fill(0,5)
 		rect(0,0,800,800)
 		rectMode(RADIUS)
@@ -557,8 +665,9 @@ if params.pretty:
 else:
 	old_time = time.time()
 	for i in count():
-		meta.step_purerejection()
-		#meta.step_gillespie()
+
+		meta.step()
+
 		# Return a summary 
 		if meta.processed % params.summaryinterval == 0:
 			new_time = time.time()
@@ -568,4 +677,8 @@ else:
 		# We've substracted and added from and to the total_rate variable and group rates of log-bined process sets a lot.
 		# So to make sure that floating point underflow don't bit us back, we recompute all of these every few hundred-thousand steps.
 		if meta.processed % params.recalibrateinterval == 0:
-			meta._total_rate = sum(pr.rate for pr in meta._sorted_processes)
+			if params.step_algorithm == 'gillespie' or params.step_algorithm == 'rejection':
+				meta._total_rate = sum(pr.rate for pr in meta._sorted_processes)
+			elif params.step_algorithm == 'composition-rejection':
+				meta._total_rate = sum(pr.rate for pr in chain.from_iterable(logbinself.processes_in_bin for logbin in meta._process_bins.itervalues()))
+			
