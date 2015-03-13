@@ -28,7 +28,6 @@ class Parameters(object):
 		self.drawinterval = 20
 		self.summaryinterval = 1000
 		self.recalibrateinterval = 200000
-		self.pmin = 0.01
 
 		# Step algorithm is either 'gillespie', 'rejection', or 'composition-rejection'
 		#self.step_algorithm = 'gillespie'
@@ -38,13 +37,18 @@ class Parameters(object):
 		# Stochastic rates and lattice parameters
 		self.birthrate = 1.0
 		self.deathrate = 0.5
-		self.intracomprate = 0.02
+		self.intracomprate = 0.01
 		self.intercomprate = 0.01
 
 		self.mutationrate = 0.04
 		self.nichestep = 1
 		self.nicheWidth = 21
 		self.vulnstep = 1
+
+		# Probabily about smallest rate above, unless some
+		# processes have short-tailed kernels, in which case you
+		# might want to make this dynamic
+		self.pmin = 0.01
 
 		# Pretty colors for plotting
 		# Thanks IWantHue @ http://tools.medialab.sciences-po.fr/iwanthue/
@@ -514,11 +518,7 @@ class Metaprocess(object):
 		residue = None
 		if len(self._process_bins) > 0:
 			r1 = random()
-			try:
-				delta_t = -log(r1)/self._total_rate
-			except ZeroDivisionError:
-				print(self._process_bins)
-
+			delta_t = -log(r1)/self._total_rate
 			self._t += delta_t
 
 			rG = random()
@@ -567,17 +567,21 @@ if params.fixed_seed: seed(params.fixed_seed)
 
 meta = Metaprocess(params)
 
-lattice = Lattice(meta, [], [BirthProcess, DeathProcess, IntraCompetitionProcess, StepMutationProcess], [NNInterCompetitionProcess], params)
-#lattice = Lattice(meta, [], [BirthProcess, DeathProcess, IntraCompetitionProcess], [])
+#lattice = Lattice(meta, [], [BirthProcess, DeathProcess, IntraCompetitionProcess, StepMutationProcess], [NNInterCompetitionProcess], params)
+lattice = Lattice(meta, [], [BirthProcess, DeathProcess, IntraCompetitionProcess], [], params)
 
-p1 = Point(niche=5,age=0.0,vulnerability=0)
-p4 = Point(niche=5,age=0.0,vulnerability=4)
+# p1 = Point(niche=15,age=0.0,vulnerability=0)
+# p4 = Point(niche=5,age=0.0,vulnerability=4)
 
-for i in xrange(5):
-	lattice.create(p1)
-	lattice.create(p4)
+# for i in xrange(5):
+# 	lattice.create(p1)
+# 	lattice.create(p4)
 
-
+for i in xrange(21):
+	lattice.create(Point(niche=i, age=0.0, vulnerability=0))
+	lattice.create(Point(niche=i, age=0.0, vulnerability=0))
+	lattice.create(Point(niche=i, age=0.0, vulnerability=0))
+	lattice.create(Point(niche=i, age=0.0, vulnerability=0))
 
 if params.pretty:
 	from pyprocessing import *
@@ -680,5 +684,5 @@ else:
 			if params.step_algorithm == 'gillespie' or params.step_algorithm == 'rejection':
 				meta._total_rate = sum(pr.rate for pr in meta._sorted_processes)
 			elif params.step_algorithm == 'composition-rejection':
-				meta._total_rate = sum(pr.rate for pr in chain.from_iterable(logbinself.processes_in_bin for logbin in meta._process_bins.itervalues()))
+				meta._total_rate = sum(pr.rate for pr in chain.from_iterable(logbin.processes_in_bin for logbin in meta._process_bins.itervalues()))
 			
