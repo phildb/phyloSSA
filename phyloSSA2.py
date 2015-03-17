@@ -6,9 +6,6 @@ from collections import namedtuple, defaultdict
 from sys import exit
 import time
 
-
-
-
 Point = namedtuple('Point', ['niche','age', 'vulnerability'])
 
 
@@ -24,8 +21,10 @@ class Parameters(object):
 	def __init__(self):
 		# General parameters
 		self.fixed_seed = False
-		self.pretty = True
-		self.drawinterval = 20
+		
+		# visualization = 'console', 'pretty', or 'pretty3d'
+		self.visualization = 'pretty3d'
+		self.drawinterval = 10
 		self.summaryinterval = 1000
 		self.recalibrateinterval = 200000
 
@@ -37,24 +36,43 @@ class Parameters(object):
 		# Stochastic rates and lattice parameters
 		self.birthrate = 1.0
 		self.deathrate = 0.5
-		self.intracomprate = 0.01
+		self.intracomprate = 0.03
+		self.nichestep = 1
 		self.intercomprate = 0.01
 
-		self.mutationrate = 0.04
-		self.nichestep = 1
+		self.nichemutationrate = 0.03
+		self.nicheKernel = [-1, 0, 1]
 		self.nicheWidth = 21
-		self.vulnstep = 1
+
+		self.vulnerabilitymutationrate = 0.03
+		#self.vulnstep = 1
+		self.vulnKernel = [-1, 0, 1]
+		self.vulnerabilityWidth = 11
 
 		# Probabily about smallest rate above, unless some
 		# processes have short-tailed kernels, in which case you
 		# might want to make this dynamic
-		self.pmin = 0.01
+		self.pmin = 0.005
 
 		# Pretty colors for plotting
 		# Thanks IWantHue @ http://tools.medialab.sciences-po.fr/iwanthue/
 		self.dark_palette = [[180,220,212],[219,65,42],[203,82,223],[104,220,73],[55,32,58],[221,173,53],[83,132,209],[222,132,172],[53,88,51],[98,225,160],[222,182,145],[73,126,144],[144,49,73],[205,220,64],[137,44,115],[146,63,32],[123,113,230],[223,51,97],[108,165,56],[146,103,82],[210,139,223],[53,43,29],[206,202,117],[217,124,57],[159,132,58],[87,160,105],[47,70,114],[212,72,177],[122,181,217],[144,155,128],[170,227,128],[195,223,173],[220,200,212],[86,28,28],[42,71,71],[94,79,27],[217,131,120],[175,162,223],[151,99,154],[78,116,40],[83,162,151],[100,223,217],[214,64,131],[114,82,172],[118,68,91],[78,49,107],[109,106,100],[181,145,165],[206,79,85],[110,113,142]]
 		self.light_palette = [[228,222,154],[224,177,237],[79,225,230],[248,150,144],[99,245,176],[248,167,82],[242,230,81],[149,205,107],[191,195,213],[173,238,199],[234,174,134],[227,205,106],[154,183,232],[215,247,102],[239,159,200],[50,243,221],[234,171,173],[100,211,241],[103,209,189],[246,194,79],[88,203,150],[163,234,233],[123,230,139],[178,195,116],[230,190,213],[151,196,156],[226,177,98],[239,156,102],[191,239,151],[142,203,133],[187,208,99],[188,228,169],[166,240,127],[188,174,211],[234,249,163],[172,215,194],[121,197,198],[229,242,122],[138,236,180],[203,181,106],[216,208,242],[171,208,222],[119,242,210],[240,221,98],[68,217,177],[218,190,75],[201,188,128],[230,213,131],[195,210,81],[212,227,145]]
+		self.indigo_palette = [[68,111,212],[213,85,245],[164,97,166],[231,135,239],[139,102,238],[111,109,177],[168,133,223],[162,81,201],[119,94,205],[212,115,245],[98,117,239],[134,144,233],[161,90,185],[134,100,183],[79,141,241],[153,124,235],[178,73,218],[192,133,238],[203,95,216],[207,125,215],[97,114,195]]
+		self.purple_wine_palette = [[110,20,58],[177,36,151],[89,81,70],[192,35,110],[151,71,132],[65,24,32],[98,19,80],[147,74,96],[129,93,93],[146,25,90],[133,32,116],[92,37,59],[122,51,94],[76,21,62],[147,50,80],[112,63,73],[61,14,40],[169,49,132],[150,75,117],[123,47,109],[172,57,110]]
+		self.blue_ocean_palette = [[85,126,191],[31,38,50],[115,115,121],[36,51,100],[86,121,230],[78,86,170],[50,100,125],[113,120,157],[47,97,146],[84,78,114],[21,50,80],[63,130,170],[65,68,77],[72,114,196],[79,91,147],[39,39,75],[71,85,110],[34,87,164],[56,127,225],[100,111,203],[32,66,118]]
+		
+		# Credits to Miaka @ COLOURlovers.com
+		self.influenza_palette = [[48,0,48],[72,0,72],[96,24,72],[192,72,72],[240,114,65]]
+		
+		# Credits to mandarina81 @ COLOURlovers.com
+		self.scienceNOVA_palette = [[255,246,154],[245,194,117],[207,125,127],[110,51,88],[39,5,60]]
+		
+		# Credits to am-y @ COLOURlovers.com
+		self.muted_metals_palette = [[17,28,34],[36,61,66],[205,197,127],[237,220,204],[184,179,173]]
 
+		# Set the palette of your choosing
+		self.palette = self.indigo_palette
 
 class BirthProcess(object):
 	''' The Birth process is a 1st order process sitting at a Point.\n
@@ -72,7 +90,10 @@ class BirthProcess(object):
 		self.params = None
 
 	def __repr__(self):
-		return '\nBirth (n=' + repr(self.point.niche) + ', a=' + repr(self.point.age) + ', v=' + repr(self.point.vulnerability) + ') | rate=' + repr(self.rate)
+		return('\nBirth (n=' + repr(self.point.niche) 
+					+ ', a=' + repr(self.point.age) 
+					+ ', v=' + repr(self.point.vulnerability) 
+			   + ') | rate=' + repr(self.rate))
 
 	def refresh_rate(self):
 		self.rate = self.params.birthrate * self.lattice.n(self.point)
@@ -95,7 +116,10 @@ class DeathProcess(object):
 		self.params = None
 
 	def __repr__(self):
-		return '\nDeath (n=' + repr(self.point.niche) + ', a=' + repr(self.point.age) + ', v=' + repr(self.point.vulnerability) + ') | rate=' + repr(self.rate)
+		return('\nDeath (n=' + repr(self.point.niche) 
+					+ ', a=' + repr(self.point.age) 
+					+ ', v=' + repr(self.point.vulnerability) 
+			   + ') | rate=' + repr(self.rate))
 
 	def refresh_rate(self):
 		self.rate = self.params.deathrate * self.lattice.n(self.point)
@@ -103,33 +127,57 @@ class DeathProcess(object):
 	def do(self):
 		self.lattice.annihilate(self.point)
 
-
-class MutationProcess(object):
-
-	def __init__(self, point, lattice, params):
-		self.order = 1
-		self.rate = 0.0
-		self.point = point
+class CatastropheProcess(object):
+	def __init__(self, lattice, params):
+		self.order = 0
+		self.rate = 0
 		self.lattice = lattice
 		self.params = params
 
 	def __del__(self):
-		self.point = None
 		self.lattice = None
 		self.params = None
-	
+
+	def __repr__(self):
+		return('\nVuln Catastrophe | rate=' + repr(self.rate))
+
+	@staticmethod
+	def stencile(lattice, params):
+		pass
+
 	def refresh_rate(self):
-		self.rate = self.params.mutationrate * self.lattice.n(self.point)
+		pass
 
 	def do(self):
-		new_mutant = Point(niche=(self.point.niche + sample([-self.params.nichestep, self.params.nichestep],1)[0] + (random() - 0.5*self.params.nichestep)) % self.params.nicheWidth, age=self.lattice.t())
-		#new_mutant = Point(niche=(self.point.niche + sample([-1,1],1)[0]) % nicheWidth, age=self.lattice.t(), vulnerability=0)
-		self.lattice.create(new_mutant)
-		return [self.point, new_mutant]
+		pass
 
-class StepMutationProcess(object):
 
-	global nicheWidth
+
+# class MutationProcess(object):
+
+# 	def __init__(self, point, lattice, params):
+# 		self.order = 1
+# 		self.rate = 0.0
+# 		self.point = point
+# 		self.lattice = lattice
+# 		self.params = params
+
+# 	def __del__(self):
+# 		self.point = None
+# 		self.lattice = None
+# 		self.params = None
+	
+# 	def refresh_rate(self):
+# 		self.rate = self.params.mutationrate * self.lattice.n(self.point)
+
+# 	def do(self):
+# 		#new_mutant = Point(niche=(self.point.niche + sample([-self.params.nichestep, self.params.nichestep],1)[0] + (random() - 0.5*self.params.nichestep)) % self.params.nicheWidth, age=self.lattice.t())
+# 		#new_mutant = Point(niche=(self.point.niche + sample([-1,1],1)[0]) % nicheWidth, age=self.lattice.t(), vulnerability=0)
+
+# 		self.lattice.create(new_mutant)
+# 		return [self.point, new_mutant]
+
+class NicheStepMutationProcess(object):
 
 	def __init__(self, point, lattice, params):
 		self.order = 1
@@ -144,22 +192,59 @@ class StepMutationProcess(object):
 		self.params = None
 	
 	def __repr__(self):
-		return '\nStepMut (n=' + repr(self.point.niche) + ', a=' + repr(self.point.age) + ', v=' + repr(self.point.vulnerability) + ') | rate=' + repr(self.rate)
+		return('\nNiStepMut (n=' + repr(self.point.niche) 
+					  + ', a=' + repr(self.point.age) 
+					  + ', v=' + repr(self.point.vulnerability) 
+				+  ') | rate=' + repr(self.rate))
 
 	def refresh_rate(self):
-		self.rate = self.params.mutationrate * self.lattice.n(self.point)
+		self.rate = self.params.nichemutationrate * self.lattice.n(self.point)
 
 	def do(self):
-		step_dbn = [-2*self.params.nichestep, -self.params.nichestep, -self.params.nichestep, 0, self.params.nichestep, self.params.nichestep, 2*self.params.nichestep]
-		niche_step = sample(step_dbn, 1)[0]
-		vuln_dbn = [-self.params.vulnstep, 0, self.params.vulnstep]
-		vulnerability_step = sample(vuln_dbn, 1)[0]
+		#step_dbn = [-2*self.params.nichestep, -self.params.nichestep, -self.params.nichestep, 0, self.params.nichestep, self.params.nichestep, 2*self.params.nichestep]
+		#step_dbn = [-self.params.nichestep, -self.params.nichestep, 0, self.params.nichestep, self.params.nichestep]
+		#niche_step = sample(step_dbn, 1)[0]
+		niche_step = sample(self.params.nicheKernel, 1)[0]
 		new_niche = (self.point.niche + niche_step) % self.params.nicheWidth
-		new_mutant = Point(niche=new_niche, age=self.lattice.t(), vulnerability=0)
-		#new_mutant = Point(niche=(self.point.niche + sample([-1,1],1)[0]) % nicheWidth, age=self.lattice.t())
+
+		new_mutant = Point(niche=new_niche, age=self.lattice.t(), vulnerability=self.point.vulnerability)
 		self.lattice.create(new_mutant)
 		return ('mutation', self.point, new_mutant)
 
+
+class VulnerabilityStepMutationProcess(object):
+
+	def __init__(self, point, lattice, params):
+		self.order = 1
+		self.rate = 0.0
+		self.point = point
+		self.lattice = lattice
+		self.params = params
+
+	def __del__(self):
+		self.point = None
+		self.lattice = None
+		self.params = None
+	
+	def __repr__(self):
+		return('\nVuStepMut (n=' + repr(self.point.niche) 
+					  + ', a=' + repr(self.point.age) 
+					  + ', v=' + repr(self.point.vulnerability) 
+				+  ') | rate=' + repr(self.rate))
+
+	def refresh_rate(self):
+		self.rate = self.params.vulnerabilitymutationrate * self.lattice.n(self.point)
+
+	def do(self):
+		#vuln_dbn = [-self.params.vulnstep, 0, self.params.vulnstep]
+		#vulnerability_step = sample(vuln_dbn, 1)[0]
+		vulnerability_step = sample(self.params.vulnKernel, 1)[0]
+		new_vuln = (self.point.vulnerability + vulnerability_step) % self.params.vulnerabilityWidth
+
+		new_mutant = Point(niche=self.point.niche, age=self.lattice.t(), vulnerability=new_vuln)
+		
+		self.lattice.create(new_mutant)
+		return ('mutation', self.point, new_mutant)
 
 class IntraCompetitionProcess(object):
 	def __init__(self, point, lattice, params):
@@ -185,7 +270,7 @@ class IntraCompetitionProcess(object):
 		self.lattice.annihilate(self.point)
 		return ('intracomp', self.point)
 
-class NNInterCompetitionProcess(object):
+class NicheNNInterCompetitionProcess(object):
 	def __init__(self, point1, point2, lattice, params):
 		self.order = 2
 		self.rate = 0.0
@@ -247,10 +332,6 @@ class NNInterCompetitionProcess(object):
 # 		self.lattice.annihilate(self.point1)
 
 
-class Bisector(object):
-	def __init__(self,rate):
-		self.rate = rate
-
 class Lattice(object):
 	'''The Lattice is the interface and the glue between the Metaprocess containing\n
 	all active processes and the internal degrees of freedom. All creation-annihilation must go
@@ -266,10 +347,16 @@ class Lattice(object):
 		self.params = params
 		self.total_n = 0
 
+		# Now attach 0-order processes to the lattice itself
+		for ztemplate in self.classes0th:
+			
+			zerothprocess = ztemplate()
+			self.attached_processes[0].append()
 
 	def create(self, point):
 		self.total_n += 1
-		if point in self.sites.keys():
+		#if point in self.sites.keys():
+		if self.sites.has_key(point):
 			# Pull affected processes
 			affected = self.attached_processes[point]
 			self.meta.pull(affected)
@@ -336,10 +423,27 @@ class Lattice(object):
 			# So you're trying to annihilate at some emtpy site? Something went horribly wrong
 			raise ValueError('Orphan process, annihilation at empty site ' + repr(point))
 
+	def vulnerability_extinction(self, vuln):
+		for point in self.sites.keys():
+			if point.vulnerability == vuln:
+				affected = self.attached_processes[point]
+				self.meta.pull(affected)
+				self.sites[point] = 0
+				for pr in affected:
+					pr.refresh_rate()
+				del self.sites[point]
+				for pr in self.attached_processes[point]:
+					if pr.order == 2:
+						if pr.point1 != point:
+							self.attached_processes[pr.point1].remove(pr)
+						if pr.point2 != point:
+							self.attached_processes[pr.point2].remove(pr)
+				del self.attached_processes[point]
 
 	# This is used by refresh_rate methods
 	def n(self, point):
-		if point in self.sites.keys():
+		#if point in self.sites.keys():
+		if self.sites.has_key(point):
 			return self.sites[point]
 		else:
 			return 0
@@ -382,12 +486,12 @@ class Metaprocess(object):
 		self.p0 = params.pmin
 
 		if params.step_algorithm == 'gillespie':
-			self.pull = self.pull_sorted_processes
-			self.push = self.push_sorted_processes
+			self.pull = self.pull_processes
+			self.push = self.push_processes
 			self.step = self.step_gillespie
 		elif params.step_algorithm == 'rejection':
-			self.pull = self.pull_sorted_processes
-			self.push = self.push_sorted_processes
+			self.pull = self.pull_processes
+			self.push = self.push_processes
 			self.step = self.step_rejection
 		elif params.step_algorithm == 'composition-rejection':
 			self.pull = self.pull_binned_processes
@@ -395,9 +499,20 @@ class Metaprocess(object):
 			self.step = self.step_compositionrejection
 
 
+	# Used by direct Gillespie algorithm (simple accumulator)
+	def pull_processes(self, processes):
+		active_processes = {pr for pr in processes if pr.rate > 0.0}
+		self._process_bag -= active_processes
+		self._total_rate -= sum((pr.rate for pr in active_processes))
+		self._num_processes -= len(active_processes)		
 
+	def push_processes(self, processes):
+		active_processes = {pr for pr in processes if pr.rate > 0.0}
+		self._total_rate += sum(pr.rate for pr in active_processes)
+		self._num_processes += len(active_processes)
+		self._process_bag |= active_processes
 
-	# Used by rejection algorithm
+	# Used by rejection algorithm (might want to do away with the sortedcontainer)
 	def pull_sorted_processes(self, processes):
 		active_processes = [pr for pr in processes if pr.rate > 0.0]
 		self._sorted_processes -= active_processes
@@ -433,7 +548,8 @@ class Metaprocess(object):
 		self._total_rate += sum(pr.rate for li, pr in active_processes)
 		self._num_processes += len(active_processes)
 		for li, pr in active_processes:
-			if li in self._process_bins.keys():
+			#if li in self._process_bins.keys():
+			if self._process_bins.has_key(li):
 				self._process_bins[li].binrate += pr.rate
 				self._process_bins[li].processes_in_bin |= {pr}
 			else:
@@ -445,17 +561,16 @@ class Metaprocess(object):
 
 	# This might not work because the list of process is sorted
 	def step_gillespie(self):
-		total_rate = sum(pr.rate for pr in self._sorted_processes)
-		if len(meta._sorted_processes) > 0:
+		if len(self._process_bag) > 0:
 			r1 = random()
-			self._t += -log(r1)/total_rate
+			self._t += -log(r1)/self._total_rate
 			r2 = random()
 			acc = 0.0
-			for pr in self._sorted_processes:
+			for pr in self._process_bag:
 				acc += pr.rate
 				self.intervaltries += 1
 
-				if r2*total_rate < acc:
+				if r2*self._total_rate < acc:
 #					self.intervaltries += 1
 					residue = pr.do()
 					break
@@ -473,7 +588,7 @@ class Metaprocess(object):
 		#if self._total_rate > 0.0:
 		#if True:
 		# This one's the right one, the true absorbing state; no relying on floats:
-		if len(meta._sorted_processes) > 0:
+		if len(meta._process_bag) > 0:
 			r1 = random()
 			delta_t = -log(r1)/self._total_rate
 			self._t += delta_t
@@ -483,7 +598,8 @@ class Metaprocess(object):
 			# the first nonzero rate.
 			# min_rate = self._sorted_processes[0].rate
 			#max_rate = self._sorted_processes[-1].rate
-			max_rate = max(pr.rate for pr in self._sorted_processes)
+			#max_rate = max(pr.rate for pr in self._sorted_processes)
+			max_rate = max((pr.rate for pr in self._process_bag))
 
 			for i in count():
 				#number_of_processes = len(self._sorted_processes)
@@ -499,8 +615,9 @@ class Metaprocess(object):
 				#	print 'wtf'
 				#process = sample(self._sorted_processes,1)[0]
 				
-				ri = randint(0, len(self._sorted_processes)-1)
-				process = self._sorted_processes[ri]
+				#ri = randint(0, len(self._sorted_processes)-1)
+				#process = self._sorted_processes[ri]
+				process = sample(self._process_bag, 1)[0]
 
 				if process.rate >= uniform(0, max_rate):
 					residue = process.do()
@@ -561,14 +678,12 @@ def summary(old_time, new_time):
 
 params = Parameters()
 
-iwanthue = dict()
-
 if params.fixed_seed: seed(params.fixed_seed)
 
 meta = Metaprocess(params)
 
-#lattice = Lattice(meta, [], [BirthProcess, DeathProcess, IntraCompetitionProcess, StepMutationProcess], [NNInterCompetitionProcess], params)
-lattice = Lattice(meta, [], [BirthProcess, DeathProcess, IntraCompetitionProcess], [], params)
+lattice = Lattice(meta, [], [BirthProcess, DeathProcess, IntraCompetitionProcess, VulnerabilityStepMutationProcess], [NicheNNInterCompetitionProcess], params)
+#lattice = Lattice(meta, [], [BirthProcess, DeathProcess, IntraCompetitionProcess], [], params)
 
 # p1 = Point(niche=15,age=0.0,vulnerability=0)
 # p4 = Point(niche=5,age=0.0,vulnerability=4)
@@ -578,21 +693,22 @@ lattice = Lattice(meta, [], [BirthProcess, DeathProcess, IntraCompetitionProcess
 # 	lattice.create(p4)
 
 for i in xrange(21):
-	lattice.create(Point(niche=i, age=0.0, vulnerability=0))
-	lattice.create(Point(niche=i, age=0.0, vulnerability=0))
-	lattice.create(Point(niche=i, age=0.0, vulnerability=0))
-	lattice.create(Point(niche=i, age=0.0, vulnerability=0))
+	for j in xrange(21):
+		lattice.create(Point(niche=i, age=0.0, vulnerability=j))
+		lattice.create(Point(niche=i, age=0.0, vulnerability=j))
+		lattice.create(Point(niche=i, age=0.0, vulnerability=j))
+		lattice.create(Point(niche=i, age=0.0, vulnerability=j))
 
-if params.pretty:
+if params.visualization == 'pretty':
 	from pyprocessing import *
-
-	
+	iwanthue = dict()
 
 	def setup():
 		global old_time, new_time
 		old_time = time.time()
-		frameRate(100)
+		#frameRate(100)
 		size(800,800)
+		smooth()
 		ellipseMode(CENTER)
 		noStroke()
 		fill(0)
@@ -628,10 +744,11 @@ if params.pretty:
 		rectMode(RADIUS)
 		y = (meta._t/0.01) % 700
 		for i,(point, n) in enumerate(lattice.sites.iteritems()):
-			if point in iwanthue.keys():
+			#if point in iwanthue.keys():
+			if iwanthue.has_key(point):
 				fill(*iwanthue[point])
 			else:
-				new_hue = sample(params.light_palette,1)[0]
+				new_hue = sample(params.palette,1)[0]
 				iwanthue[point] = new_hue
 				fill(*iwanthue[point])
 
@@ -666,7 +783,53 @@ if params.pretty:
 		# 	rect(50 + point.niche/10.0*700.0, 50 + y, 1, 1)
 
 	run()
-else:
+elif params.visualization == 'pretty3d':
+	from pyprocessing import *
+	iwanthue = dict()
+	h = 0
+
+	def setup():
+		size(1200, 840)
+		#frameRate(100)
+		background(0)
+		ellipseMode(CENTER)
+
+	def draw():
+		global h
+		for i in xrange(20):
+			residue = meta.step()
+
+		background(0)
+
+		h = max(h, sum(p.age for p in lattice.sites.iterkeys())/len(lattice.sites.keys()))
+
+		camera(-20, -40, 20.0+h, 30.0, 20.0, 0+h, 0.0, 0.0, -1.0);
+	
+		#translate(-100, -100, 0)
+
+
+		for i, (point, n) in enumerate(lattice.sites.iteritems()):
+			noFill()
+			if iwanthue.has_key(point):
+				stroke(*iwanthue[point])
+			else:
+				new_hue = sample(params.palette,1)[0]
+				iwanthue[point] = new_hue
+				stroke(*iwanthue[point])
+
+			r = n*1.0
+			x = point.niche*10.0
+			y = point.vulnerability*10.0
+			z = point.age*1.0
+
+			pushMatrix()
+			translate(x,y,z)
+			ellipse(0,0,r,r)
+			popMatrix()
+
+	run()
+
+elif params.visualization == 'console':
 	old_time = time.time()
 	for i in count():
 
