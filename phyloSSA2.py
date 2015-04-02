@@ -1,7 +1,7 @@
 from sortedcontainers import SortedListWithKey, SortedList, SortedSet
 from random import sample, randint, uniform, random, seed, getstate
 from itertools import count, permutations, combinations, izip, chain
-from math import sqrt, log, exp, pi, floor
+from math import sqrt, log, exp, pi, floor, tanh
 from collections import namedtuple, defaultdict
 from sys import exit
 import time
@@ -24,6 +24,9 @@ class Parameters(object):
 		
 		# visualization = 'console', 'pretty', or 'pretty3d'
 		self.visualization = 'pretty3d'
+		
+		self.pptrait = 10.0
+
 		self.drawinterval = 10
 		self.summaryinterval = 1000
 		self.recalibrateinterval = 200000
@@ -36,7 +39,7 @@ class Parameters(object):
 		# Stochastic rates and lattice parameters
 		self.birthrate = 1.0
 		self.deathrate = 0.5
-		self.intracomprate = 0.03
+		self.intracomprate = 0.02
 		self.nichestep = 1
 		self.intercomprate = 0.01
 
@@ -72,7 +75,7 @@ class Parameters(object):
 		self.muted_metals_palette = [[17,28,34],[36,61,66],[205,197,127],[237,220,204],[184,179,173]]
 
 		# Set the palette of your choosing
-		self.palette = self.indigo_palette
+		self.palette = self.muted_metals_palette
 
 class BirthProcess(object):
 	''' The Birth process is a 1st order process sitting at a Point.\n
@@ -682,7 +685,8 @@ if params.fixed_seed: seed(params.fixed_seed)
 
 meta = Metaprocess(params)
 
-lattice = Lattice(meta, [], [BirthProcess, DeathProcess, IntraCompetitionProcess, VulnerabilityStepMutationProcess], [NicheNNInterCompetitionProcess], params)
+lattice = Lattice(meta, [], [BirthProcess, DeathProcess, IntraCompetitionProcess, NicheStepMutationProcess], [NicheNNInterCompetitionProcess], params)
+#lattice = Lattice(meta, [], [BirthProcess, DeathProcess, IntraCompetitionProcess, VulnerabilityStepMutationProcess], [NicheNNInterCompetitionProcess], params)
 #lattice = Lattice(meta, [], [BirthProcess, DeathProcess, IntraCompetitionProcess], [], params)
 
 # p1 = Point(niche=15,age=0.0,vulnerability=0)
@@ -692,12 +696,11 @@ lattice = Lattice(meta, [], [BirthProcess, DeathProcess, IntraCompetitionProcess
 # 	lattice.create(p1)
 # 	lattice.create(p4)
 
-for i in xrange(21):
-	for j in xrange(21):
-		lattice.create(Point(niche=i, age=0.0, vulnerability=j))
-		lattice.create(Point(niche=i, age=0.0, vulnerability=j))
-		lattice.create(Point(niche=i, age=0.0, vulnerability=j))
-		lattice.create(Point(niche=i, age=0.0, vulnerability=j))
+for i in xrange(0,21,3):
+		lattice.create(Point(niche=i, age=0.0, vulnerability=0))
+		lattice.create(Point(niche=i, age=0.0, vulnerability=3))
+		lattice.create(Point(niche=i, age=0.0, vulnerability=6))
+		lattice.create(Point(niche=i, age=0.0, vulnerability=9))
 
 if params.visualization == 'pretty':
 	from pyprocessing import *
@@ -796,37 +799,69 @@ elif params.visualization == 'pretty3d':
 
 	def draw():
 		global h
-		for i in xrange(20):
+		for i in xrange(100):
 			residue = meta.step()
 
 		background(0)
 
 		h = max(h, sum(p.age for p in lattice.sites.iterkeys())/len(lattice.sites.keys()))
 
-		camera(-20, -40, 20.0+h, 30.0, 20.0, 0+h, 0.0, 0.0, -1.0);
+		camera(-40, -50, 30.0+h, 30.0, 20.0, 0+h, 0.0, 0.0, -1.0);
 	
 		#translate(-100, -100, 0)
 
+		stroke(50)
+		strokeWeight(1)
+		line(0, 0, h, params.nicheWidth*params.pptrait, 0, h)
+		line(0, 0, h, 0, params.vulnerabilityWidth*params.pptrait, h)
+
+		oldest = min(p.age for p in lattice.sites.iterkeys())
+		youngest = max(p.age for p in lattice.sites.iterkeys())
+
+		line(params.nicheWidth*params.pptrait, 0, -1, params.nicheWidth*params.pptrait, 0, oldest)
+		stroke(150,50,50)
+		strokeWeight(4)
+		line(params.nicheWidth*params.pptrait, 0, oldest, params.nicheWidth*params.pptrait, 0, youngest)
+		stroke(50)
+		strokeWeight(1)
+		line(params.nicheWidth*params.pptrait, 0, youngest, params.nicheWidth*params.pptrait, 0, youngest+100)
 
 		for i, (point, n) in enumerate(lattice.sites.iteritems()):
-			noFill()
+
 			if iwanthue.has_key(point):
-				stroke(*iwanthue[point])
+				#stroke(*iwanthue[point])
+				fill(*iwanthue[point])
 			else:
 				new_hue = sample(params.palette,1)[0]
 				iwanthue[point] = new_hue
-				stroke(*iwanthue[point])
+				#stroke(*iwanthue[point])
+				fill(*iwanthue[point])
 
-			r = n*1.0
-			x = point.niche*10.0
-			y = point.vulnerability*10.0
+			
+			r = n
+			x = point.niche*params.pptrait
+			y = point.vulnerability*params.pptrait
 			z = point.age*1.0
+
+			stroke(*iwanthue[point])
+			line(x,y,h,x,y,z)
+			noStroke()
 
 			pushMatrix()
 			translate(x,y,z)
 			ellipse(0,0,r,r)
 			popMatrix()
-
+			
+			# dh = 20
+			# for z in [-2*dh, -dh, 0, dh, 2*dh]:
+			# 	gridz = floor(h/dh)*dh + z
+			# 	alphaz = 255*(tanh(2*dh + gridz - h) + tanh(2*dh - gridz + h))/2.0
+			# 	stroke(200, 200, 200, alphaz)
+			# 	line(0, 0, gridz, 200, 0, gridz)
+			# 	line(200, 0, gridz, 200, 200, gridz)
+			# 	line(200, 200, gridz, 0, 200, gridz)
+			# 	line(0, 200, gridz,0, 0, gridz)
+	
 	run()
 
 elif params.visualization == 'console':
