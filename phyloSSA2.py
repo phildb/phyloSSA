@@ -4,6 +4,7 @@ from itertools import count, permutations, combinations, izip, chain
 from math import sqrt, log, exp, pi, floor, tanh, sin, cos
 from collections import namedtuple, defaultdict
 from sys import exit
+import ete2
 import time
 
 
@@ -43,12 +44,12 @@ class Parameters(object):
 		self.fixed_seed = False
 		
 		# visualization = 'console', 'pretty', or 'pretty3d'
-		#self.visualization = 'pretty3d'
+		#self.visualization = 'console'
 		self.visualization = 'pretty3d'
 		
 		self.pptrait = 10.0
 
-		self.drawinterval = 400
+		self.drawinterval = 100
 		self.summaryinterval = 1000
 		self.recalibrateinterval = 200000
 
@@ -60,7 +61,7 @@ class Parameters(object):
 		# Stochastic rates and lattice parameters
 		self.birthrate = 1.0
 		self.deathrate = 0.5
-		self.intracomprate = 0.01
+		self.intracomprate = 0.04
 		self.nichestep = 1
 		self.intercomprate = 0.005
 
@@ -73,12 +74,12 @@ class Parameters(object):
 		self.vulnKernel = [-1, 1]
 		self.vulnerabilityWidth = 21
 
-		self.catastropherate = 0.01
+		self.catastropherate = 0.005
 
 		# Probabily about smallest rate above, unless some
 		# processes have short-tailed kernels, in which case you
 		# might want to make this dynamic
-		self.pmin = 0.005
+		self.pmin = 0.01
 
 		# Pretty colors for plotting
 		# Thanks IWantHue @ http://tools.medialab.sciences-po.fr/iwanthue/
@@ -125,7 +126,7 @@ class BirthProcess(object):
 		self.rate = self.params.birthrate * self.lattice.n(self.point)
 
 	def do(self):
-		self.lattice.create(self.point)
+		self.lattice.create(self.point, parent_age=self.point.age)
 
 
 class DeathProcess(object):
@@ -238,7 +239,7 @@ class NicheStepMutationProcess(object):
 		new_niche = (self.point.niche + niche_step) % self.params.nicheWidth
 
 		new_mutant = Point(niche=new_niche, age=self.lattice.t(), vulnerability=self.point.vulnerability)
-		self.lattice.create(new_mutant)
+		self.lattice.create(new_mutant, parent_age=self.point.age)
 		return ('mutation', self.point, new_mutant)
 
 
@@ -273,7 +274,7 @@ class VulnerabilityStepMutationProcess(object):
 
 		new_mutant = Point(niche=self.point.niche, age=self.lattice.t(), vulnerability=new_vuln)
 		
-		self.lattice.create(new_mutant)
+		self.lattice.create(new_mutant, parent_age=self.point.age)
 		return ('mutation', self.point, new_mutant)
 
 class IntraCompetitionProcess(object):
@@ -372,6 +373,7 @@ class Lattice(object):
 	def __init__(self, meta, zerothorder, firstorder, secondorder, params):
 		self.sites = dict()
 		self.attached_processes = dict()
+		self.phylogeny = {'leaves':dict(), 'nodes':dict()}
 		self.meta = meta
 		self.classes0th = zerothorder
 		self.classes1st = firstorder
@@ -385,11 +387,22 @@ class Lattice(object):
 			for vuln in ZPrtemplate.stencile(self, self.params):
 				process = ZPrtemplate(vuln, self, self.params)
 				self.attached_processes[0].append(process)
-
 		self.meta.push(self.attached_processes[0])
 
-	def create(self, point):
+	def append_phylogeny(self, point, parent_age):
+		if self.phylogeny['leaves'].has_key(parent_age):
+			if point.age != parent_age:
+				self.phylogeny[point.age] = ('leaf', parent_age)
+			else:
+				# parent_age and point.age are the same,
+				# this is just a birth event in the same species
+				pass
+		else: # parent_age not found in phylogeny, this is 
+			pass 
+
+	def create(self, point, parent_age):
 		self.total_n += 1
+		self.append_phylogeny(point, parent_age=parent_age)
 		#if point in self.sites.keys():
 		if self.sites.has_key(point):
 			# Pull affected processes
@@ -527,8 +540,14 @@ class Metaprocess(object):
 	def number_of_active_processes(self):
 	    return max(len(self._process_bag),
 	    	len(self._sorted_processes),
-	    	sum([len(b.processes_in_bin) for b in self._process_bins.values()]))
+	    	sum([len(b.processes_in_bin) for b in self._process_bins.itervalues()]))
 	
+	@property
+	def sum_of_process_rates(self):
+		return max(sum(pr.rate for pr in self._sorted_processes), 
+		sum(pr.rate for pr in self._process_bag), 
+		sum(pr.rate for pr in chain.from_iterable([b.processes_in_bin for b in self._process_bins.itervalues()])))
+
 
 	# Used by direct Gillespie algorithm (simple accumulator)
 	def pull_processes(self, processes):
@@ -705,7 +724,7 @@ def summary(old_time, new_time):
 		+ ' | avg. tries = ' + '%.1f'%(float(meta.intervaltries)/params.summaryinterval) 
 		#+ ' | min rate = ' + '%.2f'%(meta._sorted_processes[0].rate) 
 		#+ ' | max rate = ' + '%.2f'%meta._sorted_processes[-1].rate 
-		+ ' | delta total = ' + '%.2e'%(meta._total_rate - sum(pr.rate for pr in meta._sorted_processes)) 
+		+ ' | delta total = ' + '%.2e'%(meta._total_rate - meta.sum_of_process_rates) 
 		+ ' | in %.2f'%(new_time-old_time) + 'secs')
 
 params = Parameters()
@@ -714,7 +733,11 @@ if params.fixed_seed: seed(params.fixed_seed)
 
 meta = Metaprocess(params)
 
-lattice = Lattice(meta, [CatastropheProcess], [BirthProcess, DeathProcess, IntraCompetitionProcess, NicheStepMutationProcess, VulnerabilityStepMutationProcess], [NicheNNInterCompetitionProcess], params)
+lattice = Lattice(meta, 
+	[CatastropheProcess], 
+	[BirthProcess, DeathProcess, IntraCompetitionProcess, NicheStepMutationProcess, VulnerabilityStepMutationProcess], 
+	[NicheNNInterCompetitionProcess], 
+	params)
 #lattice = Lattice(meta, [], [BirthProcess, DeathProcess, IntraCompetitionProcess, VulnerabilityStepMutationProcess], [NicheNNInterCompetitionProcess], params)
 #lattice = Lattice(meta, [], [BirthProcess, DeathProcess, IntraCompetitionProcess], [], params)
 
@@ -732,7 +755,11 @@ lattice = Lattice(meta, [CatastropheProcess], [BirthProcess, DeathProcess, Intra
 # 		lattice.create(Point(niche=i, age=0.0, vulnerability=18))
 
 for i in xrange(20):
-	lattice.create(Point(niche=10.0, age=0.0, vulnerability=10.0))
+	lattice.create(Point(niche=10.0, age=0.0, vulnerability=10.0), parent_age=0.0)
+
+# print(meta.__dict__)
+
+# exit()
 
 if params.visualization == 'pretty':
 	from pyprocessing import *
@@ -838,10 +865,18 @@ elif params.visualization == 'pretty3d':
 
 		background(0)
 
-		#h = max(h, sum(p.age for p in lattice.sites.iterkeys())/len(lattice.sites.keys()))
+		fill(150)
+		textSize(15)
+		text(' t = %.1f' % meta._t 
+			+ ' n = ' + repr(lattice.total_n) 
+			+ ' processed = ' + repr(meta.processed)
+			,25,25)
+
+
 		h = max(max(p.age for p in lattice.sites.iterkeys()), h)
 
-		camera(-40, -50, -70+h, 30, 20, -40+h, 0, 0, 1);
+		camera(105, -130, -80+h, 105, 20, -40+h, 0, 0, 1);
+		#camera(105 + 200*sin(frame.count*0.001), 105 - 200*cos(frame.count*0.001), -80+h, 105, 105, -40+h, 0, 0, 1);
 	
 		#translate(-100, -100, 0)
 
