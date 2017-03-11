@@ -4,7 +4,7 @@ from itertools import count, permutations, combinations, izip, chain
 from math import sqrt, log, exp, pi, floor, tanh, sin, cos
 from collections import namedtuple, defaultdict
 from sys import exit
-import ete2
+#import ete2
 import time
 
 
@@ -69,7 +69,7 @@ class Parameters(object):
 		self.nicheKernel = [-1, 1]
 		self.nicheWidth = 21
 
-		self.vulnerabilitymutationrate = 0.03
+		self.vulnerabilitymutationrate = 0.07
 		#self.vulnstep = 1
 		self.vulnKernel = [-1, 1]
 		self.vulnerabilityWidth = 21
@@ -99,7 +99,7 @@ class Parameters(object):
 		self.muted_metals_palette = [[17,28,34],[36,61,66],[205,197,127],[237,220,204],[184,179,173]]
 
 		# Set the palette of your choosing
-		self.palette = self.dark_palette
+		self.palette = self.influenza_palette
 
 class BirthProcess(object):
 	''' The Birth process is a 1st order process sitting at a Point.\n
@@ -855,7 +855,7 @@ elif params.visualization == 'pretty3d':
 		#size(1900,1000)
 		#size(displayWidth, displayHeight)
 		#frameRate(100)
-		background(0)
+		background(20)
 		ellipseMode(CENTER)
 
 	def draw():
@@ -863,7 +863,7 @@ elif params.visualization == 'pretty3d':
 		for i in xrange(params.drawinterval):
 			residue = meta.step()
 
-		background(0)
+		background(20)
 
 		fill(150)
 		textSize(15)
@@ -875,8 +875,8 @@ elif params.visualization == 'pretty3d':
 
 		h = max(max(p.age for p in lattice.sites.iterkeys()), h)
 
-		camera(105, -130, -80+h, 105, 20, -40+h, 0, 0, 1);
-		#camera(105 + 200*sin(frame.count*0.001), 105 - 200*cos(frame.count*0.001), -80+h, 105, 105, -40+h, 0, 0, 1);
+		#camera(105, -130, -80+h, 105, 20, -40+h, 0, 0, 1);
+		camera(105 + 200*sin(frame.count*0.01), 105 - 200*cos(frame.count*0.01), -80+h, 105, 105, -40+h, 0, 0, 1);
 	
 		#translate(-100, -100, 0)
 
